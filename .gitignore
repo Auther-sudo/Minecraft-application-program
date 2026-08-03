@@ -1,0 +1,22 @@
+# 依赖
+node_modules/
+
+# 构建/打包产物（均可由源码重新生成）
+app/
+build/
+dist/
+*.exe
+*.pyc
+__pycache__/
+
+# 日志
+*.log
+
+# IDE / 系统文件
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# WorkBuddy 会话记忆（非项目代码）
+.workbuddy/

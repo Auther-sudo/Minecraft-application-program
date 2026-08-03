@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MC列车查询系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <!-- 配置Tailwind自定义颜色和字体 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#10B981', // 绿宝石主色调
+                        secondary: '#059669',
+                        accent: '#A7F3D0',
+                        dark: '#1F2937',
+                        light: '#F3F4F6'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .train-card {
+                @apply bg-white rounded-lg shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg;
+            }
+            .btn-primary {
+                @apply bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded transition-all duration-200;
+            }
+            .input-field {
+                @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary;
+            }
+            .section-title {
+                @apply text-[clamp(1.5rem,3vw,2rem)] font-bold text-dark mb-6 flex items-center;
+            }
+            .section-title i {
+                @apply mr-2 text-primary;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 导航栏 -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-train text-primary text-2xl"></i>
+                <h1 class="text-xl md:text-2xl font-bold text-dark">MC列车查询系统</h1>
+            </div>
+            <nav class="hidden md:flex space-x-6">
+                <a href="#train-list" class="text-gray-600 hover:text-primary transition-colors">列车列表</a>
+                <a href="#search" class="text-gray-600 hover:text-primary transition-colors">线路查询</a>
+                <a href="#fare-calculator" class="text-gray-600 hover:text-primary transition-colors">票价计算</a>
+            </nav>
+            <button class="md:hidden text-gray-600" id="mobile-menu-btn">
+                <i class="fa fa-bars text-xl"></i>
+            </button>
+        </div>
+        <!-- 移动端菜单 -->
+        <div id="mobile-menu" class="hidden md:hidden bg-white border-t">
+            <div class="container mx-auto px-4 py-3 flex flex-col space-y-3">
+                <a href="#train-list" class="text-gray-600 hover:text-primary transition-colors py-2">列车列表</a>
+                <a href="#search" class="text-gray-600 hover:text-primary transition-colors py-2">线路查询</a>
+                <a href="#fare-calculator" class="text-gray-600 hover:text-primary transition-colors py-2">票价计算</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        <!-- 欢迎信息 -->
+        <section class="mb-12 text-center">
+            <h2 class="text-[clamp(1.8rem,4vw,2.5rem)] font-bold text-dark mb-4">欢迎使用MC列车系统</h2>
+            <p class="text-gray-600 max-w-2xl mx-auto">查询列车信息、规划出行路线，所有票价以绿宝石为单位计算</p>
+        </section>
+
+        <!-- 线路查询区域 -->
+        <section id="search" class="mb-16 bg-white p-6 rounded-xl shadow-md">
+            <h2 class="section-title">
+                <i class="fa fa-search"></i>线路查询
+            </h2>
+            <div class="grid md:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label for="start-station" class="block text-gray-700 mb-2">出发站</label>
+                    <input type="text" id="start-station" class="input-field w-full" placeholder="输入出发站">
+                </div>
+                <div>
+                    <label for="end-station" class="block text-gray-700 mb-2">目的站</label>
+                    <input type="text" id="end-station" class="input-field w-full" placeholder="输入目的站">
+                </div>
+                <div class="flex items-end">
+                    <button id="search-btn" class="btn-primary w-full" disabled>
+                        <i class="fa fa-spinner fa-spin mr-1 hidden" id="search-loading"></i>
+                        <i class="fa fa-search mr-1" id="search-icon"></i> 查找列车
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 热门站点快捷选择 -->
+            <div class="mb-6">
+                <p class="text-gray-600 mb-2">热门站点: </p>
+                <div class="flex flex-wrap gap-2" id="popular-stations">
+                    <!-- 热门站点将通过JS动态生成 -->
+                </div>
+            </div>
+            
+            <!-- 查询结果 -->
+            <div id="search-results" class="hidden mt-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">查询结果</h3>
+                <div id="results-container" class="space-y-4">
+                    <!-- 结果将通过JS动态生成 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- 列车列表 -->
+        <section id="train-list" class="mb-16">
+            <h2 class="section-title">
+                <i class="fa fa-list-alt"></i>列车列表
+            </h2>
+            <div class="flex justify-center py-12" id="loading-indicator">
+                <i class="fa fa-train text-4xl text-primary/30 fa-spin"></i>
+                <p class="ml-3 text-gray-500">加载列车数据中...</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="trains-container">
+                <!-- 列车信息将通过JS动态生成 -->
+            </div>
+        </section>
+
+        <!-- 票价计算说明 -->
+        <section id="fare-calculator" class="mb-16 bg-white p-6 rounded-xl shadow-md">
+            <h2 class="section-title">
+                <i class="fa fa-diamond"></i>票价计算规则
+            </h2>
+            <div class="bg-accent/30 p-4 rounded-lg mb-6">
+                <p class="text-dark mb-2"><strong>绿宝石计价系统:</strong></p>
+                <ul class="list-disc pl-5 space-y-1 text-gray-700">
+                    <li>基础费率: 每1000米收费1颗绿宝石</li>
+                    <li>短途优惠: 5000米以内享受9折优惠</li>
+                    <li>长途优惠: 20000米以上享受8折优惠</li>
+                    <li>最低票价: 1颗绿宝石</li>
+                </ul>
+            </div>
+            
+            <div class="grid md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-lg font-semibold mb-3">票价计算器</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="distance-input" class="block text-gray-700 mb-2">距离 (米)</label>
+                            <input type="number" id="distance-input" class="input-field w-full" placeholder="输入距离">
+                        </div>
+                        <button id="calculate-fare" class="btn-primary">
+                            <i class="fa fa-calculator mr-1"></i> 计算票价
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-3">计算结果</h3>
+                    <div id="fare-result" class="border border-gray-200 rounded-lg p-4 min-h-[100px] flex items-center justify-center text-gray-500">
+                        请输入距离并计算票价
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 列车详情模态框 -->
+    <div id="train-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-xl font-bold text-dark" id="modal-title">列车详情</h3>
+                    <button id="close-modal" class="text-gray-500 hover:text-gray-700">
+                        <i class="fa fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6" id="modal-content">
+                <!-- 列车详情将通过JS动态生成 -->
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-dark text-white py-8">
+        <div class="container mx-auto px-4">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="mb-4 md:mb-0">
+                    <div class="flex items-center space-x-2 mb-2">
+                        <i class="fa fa-train text-primary"></i>
+                        <span class="font-bold">MC列车查询系统</span>
+                    </div>
+                    <p class="text-gray-400 text-sm">为您的MC旅程提供便捷的列车服务</p>
+                </div>
+                <div class="flex space-x-4">
+                    <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                        <i class="fa fa-question-circle"></i> 帮助
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                        <i class="fa fa-info-circle"></i> 关于
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                        <i class="fa fa-envelope"></i> 联系我们
+                    </a>
+                </div>
+            </div>
+            <div class="mt-6 pt-6 border-t border-gray-700 text-center text-gray-400 text-sm">
+                &copy; 2023 MC列车系统 版权所有
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // 存储从JSON加载的列车数据
+        let trainsData = [];
+
+        // DOM元素
+        const trainsContainer = document.getElementById('trains-container');
+        const searchBtn = document.getElementById('search-btn');
+        const startStationInput = document.getElementById('start-station');
+        const endStationInput = document.getElementById('end-station');
+        const searchResults = document.getElementById('search-results');
+        const resultsContainer = document.getElementById('results-container');
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const trainModal = document.getElementById('train-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalContent = document.getElementById('modal-content');
+        const closeModal = document.getElementById('close-modal');
+        const calculateFareBtn = document.getElementById('calculate-fare');
+        const distanceInput = document.getElementById('distance-input');
+        const fareResult = document.getElementById('fare-result');
+        const popularStationsContainer = document.getElementById('popular-stations');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const searchLoading = document.getElementById('search-loading');
+        const searchIcon = document.getElementById('search-icon');
+
+        // 初始化页面：从JSON文件加载数据（适配Electron环境的绝对路径）
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // 引入Node.js路径模块（Electron环境中可用）
+                const path = require('path');
+                // 构造JSON文件的绝对路径（根据你的实际路径）
+                const jsonPath = path.join('C:', 'Users', 'Lenovo', 'Desktop', 'railmap', '列车数据.json');
+                
+                // 加载列车数据
+                const response = await fetch(jsonPath);
+                if (!response.ok) {
+                    throw new Error('数据加载失败，请检查文件是否存在');
+                }
+                trainsData = await response.json();
+                
+                // 数据加载成功后渲染页面
+                loadingIndicator.classList.add('hidden');
+                renderAllTrains();
+                renderPopularStations();
+                searchBtn.disabled = false; // 启用搜索按钮
+            } catch (error) {
+                loadingIndicator.innerHTML = `
+                    <p class="text-red-500">数据加载失败: ${error.message}</p>
+                    <p class="text-gray-500 mt-2">请确认文件路径正确: C:\\Users\\Lenovo\\Desktop\\railmap\\列车数据.json</p>
+                `;
+                console.error('加载数据出错:', error);
+            }
+
+            // 移动端菜单切换
+            mobileMenuBtn.addEventListener('click', () => {
+                mobileMenu.classList.toggle('hidden');
+            });
+            
+            // 关闭模态框
+            closeModal.addEventListener('click', () => {
+                trainModal.classList.add('hidden');
+            });
+            
+            // 点击模态框外部关闭
+            trainModal.addEventListener('click', (e) => {
+                if (e.target === trainModal) {
+                    trainModal.classList.add('hidden');
+                }
+            });
+            
+            // 搜索列车
+            searchBtn.addEventListener('click', searchTrains);
+            
+            // 计算票价
+            calculateFareBtn.addEventListener('click', calculateFare);
+            
+            // 支持按Enter键搜索
+            [startStationInput, endStationInput].forEach(input => {
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !searchBtn.disabled) {
+                        searchTrains();
+                    }
+                });
+            });
+            
+            // 支持按Enter键计算票价
+            distanceInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    calculateFare();
+                }
+            });
+        });
+
+        // 渲染所有列车
+        function renderAllTrains() {
+            trainsContainer.innerHTML = '';
+            
+            trainsData.forEach(train => {
+                const trainCard = document.createElement('div');
+                trainCard.className = 'train-card';
+                trainCard.innerHTML = `
+                    <div class="p-5">
+                        <div class="flex justify-between items-start mb-3">
+                            <h3 class="font-bold text-lg text-dark">${train.train_id}</h3>
+                            <span class="bg-primary/10 text-primary text-sm px-2 py-1 rounded">${train.departure_time} 出发</span>
+                        </div>
+                        <div class="flex items-center mb-4">
+                            <div class="flex-1">
+                                <p class="font-medium">${train.start_station}</p>
+                                <p class="text-sm text-gray-500">起点站</p>
+                            </div>
+                            <div class="mx-2 flex flex-col items-center">
+                                <i class="fa fa-arrow-down text-primary"></i>
+                            </div>
+                            <div class="flex-1">
+                                <p class="font-medium">${train.end_station}</p>
+                                <p class="text-sm text-gray-500">终点站</p>
+                            </div>
+                        </div>
+                        <div class="text-sm text-gray-600 mb-4">
+                            <p>途经 ${train.selected_stations.length - 2} 个站点</p>
+                        </div>
+                        <button class="view-details-btn btn-primary w-full" data-train-id="${train.train_id}">
+                            查看详情
+                        </button>
+                    </div>
+                `;
+                
+                trainsContainer.appendChild(trainCard);
+                
+                // 添加查看详情事件
+                trainCard.querySelector('.view-details-btn').addEventListener('click', () => {
+                    showTrainDetails(train);
+                });
+            });
+        }
+
+        // 渲染热门站点
+        function renderPopularStations() {
+            // 提取所有站点并统计出现次数
+            const stationCounts = {};
+            trainsData.forEach(train => {
+                train.selected_stations.forEach(station => {
+                    stationCounts[station] = (stationCounts[station] || 0) + 1;
+                });
+            });
+            
+            // 按出现次数排序并取前8个热门站点
+            const popularStations = Object.entries(stationCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(entry => entry[0]);
+            
+            // 渲染热门站点
+            popularStations.forEach(station => {
+                const stationBtn = document.createElement('button');
+                stationBtn.className = 'bg-gray-100 hover:bg-primary/10 hover:text-primary text-gray-700 px-3 py-1 rounded-full text-sm transition-colors';
+                stationBtn.textContent = station;
+                
+                // 点击热门站点填充到输入框
+                stationBtn.addEventListener('click', () => {
+                    if (!startStationInput.value) {
+                        startStationInput.value = station;
+                    } else if (!endStationInput.value) {
+                        endStationInput.value = station;
+                    } else {
+                        startStationInput.value = station;
+                        endStationInput.value = '';
+                    }
+                });
+                
+                popularStationsContainer.appendChild(stationBtn);
+            });
+        }
+
+        // 搜索列车
+        function searchTrains() {
+            const startStation = startStationInput.value.trim();
+            const endStation = endStationInput.value.trim();
+            
+            if (!startStation || !endStation) {
+                alert('请输入出发站和目的站');
+                return;
+            }
+            
+            if (startStation === endStation) {
+                alert('出发站和目的站不能相同');
+                return;
+            }
+            
+            // 显示加载状态
+            searchLoading.classList.remove('hidden');
+            searchIcon.classList.add('hidden');
+            searchBtn.disabled = true;
+            
+            // 查找符合条件的列车
+            const matchingTrains = trainsData.filter(train => {
+                const stations = train.selected_stations;
+                const startIndex = stations.indexOf(startStation);
+                const endIndex = stations.indexOf(endStation);
+                return startIndex !== -1 && endIndex !== -1 && startIndex < endIndex;
+            });
+            
+            // 显示搜索结果
+            searchResults.classList.remove('hidden');
+            resultsContainer.innerHTML = '';
+            
+            if (matchingTrains.length === 0) {
+                resultsContainer.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="fa fa-train text-4xl mb-3 opacity-30"></i>
+                        <p>没有找到从 ${startStation} 到 ${endStation} 的直达列车</p>
+                    </div>
+                `;
+            } else {
+                matchingTrains.forEach(train => {
+                    // 计算距离和票价
+                    const startIndex = train.selected_stations.indexOf(startStation);
+                    const endIndex = train.selected_stations.indexOf(endStation);
+                    const startDistance = train.timetable[startIndex].distance;
+                    const endDistance = train.timetable[endIndex].distance;
+                    const distance = endDistance - startDistance;
+                    const fare = calculateFareAmount(distance);
+                    
+                    // 获取出发和到达时间
+                    const departureTime = train.timetable[startIndex].departure;
+                    const arrivalTime = train.timetable[endIndex].arrival;
+                    
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'train-card';
+                    resultItem.innerHTML = `
+                        <div class="p-5">
+                            <div class="flex justify-between items-start mb-3">
+                                <h3 class="font-bold text-lg text-dark">${train.train_id}</h3>
+                                <span class="bg-accent text-secondary px-2 py-1 rounded text-sm">${fare} 绿宝石</span>
+                            </div>
+                            
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="text-center">
+                                    <p class="font-bold text-lg">${departureTime}</p>
+                                    <p class="font-medium">${startStation}</p>
+                                </div>
+                                
+                                <div class="flex-1 mx-4">
+                                    <div class="relative">
+                                        <div class="border-t-2 border-dashed border-gray-300 absolute top-1/2 w-full"></div>
+                                        <div class="flex justify-center">
+                                            <span class="bg-primary text-white text-xs px-2 py-1 rounded-full relative z-10">
+                                                ${Math.round(distance)}米
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="text-center">
+                                    <p class="font-bold text-lg">${arrivalTime}</p>
+                                    <p class="font-medium">${endStation}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex space-x-3">
+                                <button class="view-details-btn btn-primary flex-1" data-train-id="${train.train_id}">
+                                    查看详情
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    
+                    resultsContainer.appendChild(resultItem);
+                    
+                    // 添加查看详情事件
+                    resultItem.querySelector('.view-details-btn').addEventListener('click', () => {
+                        showTrainDetails(train, startStation, endStation);
+                    });
+                });
+            }
+            
+            // 恢复按钮状态
+            searchLoading.classList.add('hidden');
+            searchIcon.classList.remove('hidden');
+            searchBtn.disabled = false;
+            
+            // 滚动到结果区域
+            searchResults.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // 显示列车详情
+        function showTrainDetails(train, startStation = null, endStation = null) {
+            modalTitle.textContent = `${train.train_id} 次列车详情`;
+            
+            // 生成时刻表HTML
+            let timetableHtml = `
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr>
+                                <th class="px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">站点</th>
+                                <th class="px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">到达时间</th>
+                                <th class="px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出发时间</th>
+                                <th class="px-4 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">距离(米)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+            `;
+            
+            train.timetable.forEach(stop => {
+                // 高亮显示查询的站点
+                const isHighlighted = (startStation && stop.station === startStation) || 
+                                     (endStation && stop.station === endStation);
+                const rowClass = isHighlighted ? 'bg-primary/10' : '';
+                
+                timetableHtml += `
+                    <tr class="${rowClass}">
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="font-medium text-gray-900">${stop.station}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-gray-600">${stop.arrival}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-gray-600">${stop.departure}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-gray-600">${stop.distance}</div>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            timetableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            // 如果有指定的起点和终点，计算票价
+            let fareHtml = '';
+            if (startStation && endStation) {
+                const startIndex = train.selected_stations.indexOf(startStation);
+                const endIndex = train.selected_stations.indexOf(endStation);
+                if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
+                    const startDistance = train.timetable[startIndex].distance;
+                    const endDistance = train.timetable[endIndex].distance;
+                    const distance = endDistance - startDistance;
+                    const fare = calculateFareAmount(distance);
+                    
+                    fareHtml = `
+                        <div class="mt-6 p-4 bg-accent/30 rounded-lg">
+                            <h4 class="font-semibold mb-2">票价信息</h4>
+                            <p><strong>${startStation}</strong> 到 <strong>${endStation}</strong></p>
+                            <p>距离: ${Math.round(distance)} 米</p>
+                            <p class="text-lg font-bold text-primary mt-2">票价: ${fare} 绿宝石</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            modalContent.innerHTML = `
+                <div class="mb-6">
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <p class="text-gray-500 text-sm">列车编号</p>
+                            <p class="font-medium">${train.train_id}</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 text-sm">出发时间</p>
+                            <p class="font-medium">${train.departure_time}</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 text-sm">起点站</p>
+                            <p class="font-medium">${train.start_station}</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 text-sm">终点站</p>
+                            <p class="font-medium">${train.end_station}</p>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <p class="text-gray-500 text-sm mb-1">途经站点</p>
+                        <p class="text-sm">${train.selected_stations.join(' → ')}</p>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h4 class="font-semibold mb-3">时刻表</h4>
+                    ${timetableHtml}
+                </div>
+                
+                ${fareHtml}
+            `;
+            
+            trainModal.classList.remove('hidden');
+        }
+
+        // 计算票价
+        function calculateFare() {
+            const distance = parseFloat(distanceInput.value);
+            
+            if (isNaN(distance) || distance <= 0) {
+                fareResult.innerHTML = '<span class="text-red-500">请输入有效的距离</span>';
+                return;
+            }
+            
+            const fare = calculateFareAmount(distance);
+            
+            fareResult.innerHTML = `
+                <div class="text-center">
+                    <p class="mb-2">距离: ${Math.round(distance)} 米</p>
+                    <p class="text-2xl font-bold text-primary">${fare} 绿宝石</p>
+                </div>
+            `;
+        }
+
+        // 票价计算逻辑
+        function calculateFareAmount(distance) {
+            // 基础费率: 每1000米1颗绿宝石
+            let fare = distance / 1000;
+            
+            // 短途优惠: 5000米以内9折
+            if (distance < 5000) {
+                fare *= 0.9;
+            }
+            // 长途优惠: 20000米以上8折
+            else if (distance > 20000) {
+                fare *= 0.8;
+            }
+            
+            // 向上取整，最低1颗绿宝石
+            return Math.max(1, Math.ceil(fare));
+        }
+    </script>
+</body>
+</html>
