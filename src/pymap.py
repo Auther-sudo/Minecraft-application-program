@@ -24,11 +24,20 @@ class RailwayApp:
     def __init__(self, root):
         self.root = root
         self.root.title("铁路系统地图")
-        # 数据文件路径：优先使用脚本同目录下的相对路径（便于克隆/上传后直接运行），
-        # 若同目录下不存在则回退到本地绝对路径，确保原有使用方式不受影响
+        # 数据文件路径解析（兼容多种运行/部署方式）：
+        # 1) 脚本同目录；2) 项目根的 data/；3) 当前工作目录；4) 当前工作目录的 data/；
+        # 5) 本地绝对路径兜底。确保克隆/上传后或本地原有方式都能正常加载与保存。
         _script_dir = os.path.dirname(os.path.abspath(__file__))
-        _rel_data = os.path.join(_script_dir, '线路和车站数据.json')
-        self.data_file = _rel_data if os.path.exists(_rel_data) else r"E:\我的世界railmap\线路和车站数据.json"
+        _project_root = os.path.dirname(_script_dir) if os.path.basename(_script_dir) == 'src' else _script_dir
+        _candidates = [
+            os.path.join(_script_dir, '线路和车站数据.json'),
+            os.path.join(_project_root, 'data', '线路和车站数据.json'),
+            os.path.join(os.getcwd(), '线路和车站数据.json'),
+            os.path.join(os.getcwd(), 'data', '线路和车站数据.json'),
+            r"E:\我的世界railmap\线路和车站数据.json",
+        ]
+        self.data_file = next((p for p in _candidates if os.path.exists(p)),
+                              os.path.join(_project_root, 'data', '线路和车站数据.json'))
         
         # 拖动相关变量
         self.is_dragging = False

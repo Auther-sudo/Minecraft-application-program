@@ -248,17 +248,15 @@
         // 初始化页面：从JSON文件加载数据（适配Electron环境的绝对路径）
         document.addEventListener('DOMContentLoaded', async () => {
             try {
-                // 引入Node.js路径模块（Electron环境中可用）
+                // 引入Node.js模块（Electron环境中可用）
                 const path = require('path');
-                // 构造JSON文件的绝对路径（根据你的实际路径）
-                const jsonPath = path.join('C:', 'Users', 'Lenovo', 'Desktop', 'railmap', '列车数据.json');
-                
-                // 加载列车数据
-                const response = await fetch(jsonPath);
-                if (!response.ok) {
-                    throw new Error('数据加载失败，请检查文件是否存在');
-                }
-                trainsData = await response.json();
+                const fs = require('fs');
+                // 数据文件位于仓库根的 data/ 目录（相对本脚本上一级）
+                const jsonPath = path.join(__dirname, '..', 'data', '列车数据.json');
+
+                // 读取并解析列车数据
+                const trainsDataRaw = fs.readFileSync(jsonPath, 'utf-8');
+                trainsData = JSON.parse(trainsDataRaw);
                 
                 // 数据加载成功后渲染页面
                 loadingIndicator.classList.add('hidden');
@@ -268,7 +266,7 @@
             } catch (error) {
                 loadingIndicator.innerHTML = `
                     <p class="text-red-500">数据加载失败: ${error.message}</p>
-                    <p class="text-gray-500 mt-2">请确认文件路径正确: C:\\Users\\Lenovo\\Desktop\\railmap\\列车数据.json</p>
+                    <p class="text-gray-500 mt-2">请确认数据文件位于 data/列车数据.json（相对于程序目录的 ../data）</p>
                 `;
                 console.error('加载数据出错:', error);
             }

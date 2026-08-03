@@ -2,8 +2,8 @@
 
 
 a = Analysis(
-    ['pymap.py'],
-    pathex=[],
+    ['src/pymap.py'],
+    pathex=['src'],
     binaries=[],
     datas=[],
     hiddenimports=[],
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='铁路系统地图',
+    name='pymap',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['assets/铁路查询.ico'],
 )

@@ -22,5 +22,4 @@ Thumbs.db
 .workbuddy/
 
 # 本地私有数据（线路/列车真实数据，不上传，仅本地使用）
-线路和车站数据.json
-列车数据.json
+data/

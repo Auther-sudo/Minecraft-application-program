@@ -17,8 +17,8 @@ function createWindow() {
     }
   });
 
-  // 加载你的HTML文件（使用绝对路径）
-  const htmlPath = path.join('C:', 'Users', 'Lenovo', 'Desktop', 'railmap', '用户端.html');
+  // 加载HTML文件（相对于本脚本所在目录，避免硬编码路径）
+  const htmlPath = path.join(__dirname, '用户端.html');
   mainWindow.loadFile(htmlPath);
 
   // 可选：打开开发者工具（调试用）
