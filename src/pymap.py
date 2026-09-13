@@ -8,7 +8,6 @@ from tkinter import simpledialog, messagebox, filedialog, ttk, scrolledtext
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from matplotlib.collections import LineCollection
-from matplotlib.patches import Patch
 
 # 设置中文字体和负号显示
 plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC", "Arial Unicode MS"]
@@ -20,14 +19,6 @@ SPEEDS = {
     'high_speed': 12,  # 高速铁路
     'branch': 8        # 支线铁路，使用普通铁路速度
 }
-
-# 世界种子与版本号（用于程序化生成海陆底图）。
-# 重要说明：Minecraft 基岩版的真实地形生成管线为专有实现，Python 端无法精确复现；
-# 以下种子/版本仅用于驱动“确定性程序化近似地貌”，作为地图视觉参考，并非游戏内真实地形。
-WORLD_SEED = 6769531640164931490
-WORLD_VERSION = "基岩版 26.0-26.23"
-SEA_LEVEL = 0.5          # 归一化高度 < SEA_LEVEL 视为海洋
-TERRAIN_STEP = 120.0     # 底图采样步长（数据/方块单位），越小越精细、开销越大
 
 class RailwayApp:
     def __init__(self, root):
@@ -143,16 +134,6 @@ class RailwayApp:
             width=10
         )
         self.load_btn.pack(side=tk.LEFT, padx=5)
-
-        # 海陆轮廓开关（基于世界种子生成程序化近似底图，可显隐）
-        self.show_terrain = True
-        self.terrain_toggle_btn = tk.Button(
-            self.control_frame,
-            text="海陆轮廓:开",
-            command=self.toggle_terrain,
-            width=12
-        )
-        self.terrain_toggle_btn.pack(side=tk.LEFT, padx=5)
 
         # 创建画布并添加到Tkinter窗口
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
@@ -1136,7 +1117,7 @@ class RailwayApp:
         high_speed_legend_added = False
         branch_legend_added = False
 
-        # 计算地图范围（与末尾 xlim/ylim 保持一致），供海陆底图使用
+        # 计算地图范围（与末尾 xlim/ylim 保持一致）
         if self.stations:
             _ax = [p[0] for p in self.stations.values()]
             _az = [p[1] for p in self.stations.values()]
@@ -1167,9 +1148,6 @@ class RailwayApp:
                 branch_segments.append(seg)
             else:
                 normal_segments.append(seg)
-
-        # 海陆底图（程序化近似，zorder=0，置于所有线路之下）
-        self._draw_terrain(self._map_bounds)
 
         # 普通铁路：深灰主线 + 白色枕木，形成经典轨道效果
         if normal_segments:
@@ -1266,14 +1244,9 @@ class RailwayApp:
         self.ax.set_ylim(z_max, z_min)  # 反转 z 轴，正方向向下
         self.ax.set_aspect('equal', adjustable='datalim')
 
-        # 图例：小巧、白底、浅色边框（含海陆底图说明）
-        if normal_legend_added or high_speed_legend_added or branch_legend_added or self.show_terrain:
+        # 图例：小巧、白底、浅色边框
+        if normal_legend_added or high_speed_legend_added or branch_legend_added:
             handles, labels = self.ax.get_legend_handles_labels()
-            if self.show_terrain:
-                handles = list(handles) + [
-                    Patch(facecolor='#BCDCF2', alpha=0.55, label='海洋（近似）'),
-                    Patch(facecolor='#F3EFE6', alpha=0.45, label='陆地（近似）'),
-                ]
             self.ax.legend(handles, [h.get_label() for h in handles], loc='upper right', fontsize=9,
                            frameon=True, facecolor='white', edgecolor='#CCCCCC',
                            framealpha=0.95)
@@ -1287,106 +1260,6 @@ class RailwayApp:
             self._lod_connected = True
         self._update_ties()
         self._update_label_visibility()
-
-    def toggle_terrain(self):
-        """切换海陆底图显示，并重绘地图。"""
-        self.show_terrain = not self.show_terrain
-        self.terrain_toggle_btn.config(
-            text="海陆轮廓:开" if self.show_terrain else "海陆轮廓:关")
-        self.ax.clear()
-        self.draw_railway_map()
-        self.canvas.draw()
-
-    def _draw_terrain(self, bounds):
-        """基于世界种子绘制程序化近似海陆底图（非 Minecraft 真实地形）。
-
-        说明：Minecraft 基岩版地形生成管线为专有实现，Python 端无法精确复现。
-        此处用确定性 value-noise(fBm) 生成高度场，低于 SEA_LEVEL 填海洋蓝、
-        之上填陆地米色，颜色交界即海岸线，仅作地图视觉参考。
-
-        采用 imshow 绘制（纯 numpy + Agg，不依赖 contourpy），兼容性更好。
-        """
-        if not self.show_terrain:
-            self.terrain_artists = []
-            return
-        x_min, x_max, z_min, z_max = bounds
-        step = TERRAIN_STEP
-        nx = max(16, int((x_max - x_min) / step) + 1)
-        nz = max(16, int((z_max - z_min) / step) + 1)
-        xs = np.linspace(x_min, x_max, nx)
-        zs = np.linspace(z_min, z_max, nz)
-        X, Z = np.meshgrid(xs, zs)
-
-        # 复用缓存（范围不变时避免重复计算）
-        key = (nx, nz, round(x_min, 2), round(x_max, 2),
-               round(z_min, 2), round(z_max, 2))
-        cache = getattr(self, '_terrain_cache', None)
-        if cache is None or cache[0] != key:
-            H = self._terrain_height(X, Z)
-            self._terrain_cache = (key, H)
-        else:
-            H = cache[1]
-
-        sea = SEA_LEVEL
-        # 构建 RGBA 图像：海洋蓝 / 陆地米色，半透明，颜色交界即海岸线
-        ocean_rgb = np.array([0xBC / 255.0, 0xDC / 255.0, 0xF2 / 255.0])
-        land_rgb = np.array([0xF3 / 255.0, 0xEF / 255.0, 0xE6 / 255.0])
-        rgba = np.zeros((nz, nx, 4), dtype=float)
-        mask_ocean = H < sea
-        rgba[..., :3] = np.where(mask_ocean[..., np.newaxis], ocean_rgb, land_rgb)
-        rgba[..., 3] = 0.55
-
-        img = self.ax.imshow(
-            rgba, extent=[x_min, x_max, z_min, z_max],
-            origin='lower', zorder=0, interpolation='bilinear')
-        self.terrain_artists = [img]
-
-    def _terrain_height(self, X, Z):
-        """确定性 fBm 高度场（由 WORLD_SEED 驱动），归一化到 [0,1)。"""
-        span = max(float(X.max() - X.min()), float(Z.max() - Z.min()))
-        base_freq = 1.0 / (span / 3.0)  # 大陆尺度约为地图 1/3
-        H = np.zeros_like(X, dtype=float)
-        amp = 1.0
-        freq = base_freq
-        # 把 63 位世界种子拆成两段 31 位，逐倍频参与哈希，确保种子真正决定地貌
-        seed_lo = np.int64(WORLD_SEED & 0x7FFFFFFF)
-        seed_hi = np.int64((WORLD_SEED >> 31) & 0x7FFFFFFF)
-        for o in range(5):
-            salt = np.int64((seed_lo + (o + 1) * 1013904223) & 0x7FFFFFFF) ^ seed_hi
-            H += amp * self._value_noise(X, Z, freq, salt)
-            amp *= 0.5
-            freq *= 2.07  # 非整数倍，避免网格对齐伪影
-        H -= H.min()
-        H /= (H.max() + 1e-9)
-        return H
-
-    def _value_noise(self, X, Z, freq, salt):
-        """值噪声（平滑插值），返回 [0,1) 的二维数组。"""
-        fx = X * freq
-        fz = Z * freq
-        x0 = np.floor(fx).astype(np.int64)
-        z0 = np.floor(fz).astype(np.int64)
-        tx = fx - x0
-        tz = fz - z0
-        ux = tx * tx * (3.0 - 2.0 * tx)
-        uz = tz * tz * (3.0 - 2.0 * tz)
-        v00 = self._rand2(x0, z0, salt)
-        v10 = self._rand2(x0 + 1, z0, salt)
-        v01 = self._rand2(x0, z0 + 1, salt)
-        v11 = self._rand2(x0 + 1, z0 + 1, salt)
-        top = v00 * (1.0 - ux) + v10 * ux
-        bot = v01 * (1.0 - ux) + v11 * ux
-        return top * (1.0 - uz) + bot * uz
-
-    def _rand2(self, i, j, salt):
-        """整数坐标 -> [0,1) 的确定性伪随机（向量化整数哈希，种子驱动）。"""
-        i64 = i.astype(np.int64)
-        j64 = j.astype(np.int64)
-        n = np.bitwise_xor(np.left_shift(i64, 13), j64).astype(np.int64) + salt
-        n = np.bitwise_xor(n, np.right_shift(n, 17))
-        n = (n * 1274126177).astype(np.int64)
-        n = np.bitwise_and(n, np.int64(0x7FFFFFFF))
-        return n.astype(np.float64) / float(0x7FFFFFFF)
 
 if __name__ == "__main__":
     root = tk.Tk()
