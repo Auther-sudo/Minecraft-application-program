@@ -8,6 +8,7 @@ from tkinter import simpledialog, messagebox, filedialog, ttk, scrolledtext
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from matplotlib.collections import LineCollection
+from matplotlib.patches import Patch
 
 # 设置中文字体和负号显示
 plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC", "Arial Unicode MS"]
@@ -19,6 +20,14 @@ SPEEDS = {
     'high_speed': 12,  # 高速铁路
     'branch': 8        # 支线铁路，使用普通铁路速度
 }
+
+# 世界种子与版本号（用于程序化生成海陆底图）。
+# 重要说明：Minecraft 基岩版的真实地形生成管线为专有实现，Python 端无法精确复现；
+# 以下种子/版本仅用于驱动“确定性程序化近似地貌”，作为地图视觉参考，并非游戏内真实地形。
+WORLD_SEED = 6769531640164931490
+WORLD_VERSION = "基岩版 26.0-26.23"
+SEA_LEVEL = 0.5          # 归一化高度 < SEA_LEVEL 视为海洋
+TERRAIN_STEP = 120.0     # 底图采样步长（数据/方块单位），越小越精细、开销越大
 
 class RailwayApp:
     def __init__(self, root):
@@ -134,7 +143,17 @@ class RailwayApp:
             width=10
         )
         self.load_btn.pack(side=tk.LEFT, padx=5)
-        
+
+        # 海陆轮廓开关（基于世界种子生成程序化近似底图，可显隐）
+        self.show_terrain = True
+        self.terrain_toggle_btn = tk.Button(
+            self.control_frame,
+            text="海陆轮廓:开",
+            command=self.toggle_terrain,
+            width=12
+        )
+        self.terrain_toggle_btn.pack(side=tk.LEFT, padx=5)
+
         # 创建画布并添加到Tkinter窗口
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
@@ -193,15 +212,13 @@ class RailwayApp:
     def manage_stations(self):
         """管理车站：搜索、添加、编辑、删除。
 
-        注意：旧实现用 tree.bbox() + frame.place() 把按钮嵌进表格行，
-        在列表需要滚动或首帧尚未布局时 bbox() 返回空，导致 refresh_list()
-        中途抛异常——列表只刷新出前几行、按钮也只生成在前几行，表现为
-        “车站/按钮显示不全”。现改为在「操作」列显示文本，点击单元格触发
-        编辑/删除，彻底规避 bbox 失效问题，所有车站与操作都能正常显示。
+        操作拆成「编辑」「删除」两列，单元格内显示图标 + 文字（✏ 编辑 / ✖ 删除），
+        点击对应列即触发对应操作；不再依赖 tree.bbox()+place 嵌按钮（旧实现在滚动/
+        首帧 bbox 为空时会崩，导致车站/按钮显示不全）。所有车站与操作均稳定可见。
         """
         manage_window = tk.Toplevel(self.root)
         manage_window.title("车站管理")
-        manage_window.geometry("640x520")
+        manage_window.geometry("660x520")
         manage_window.transient(self.root)
         manage_window.grab_set()
 
@@ -215,24 +232,26 @@ class RailwayApp:
         search_entry.pack(side=tk.LEFT, padx=2)
         search_entry.focus_set()
 
-        ttk.Label(top_frame, text="提示：点击「编辑 | 删除」单元格操作",
+        ttk.Label(top_frame, text="提示：点击图标列进行编辑 / 删除",
                   foreground="#666666").pack(side=tk.LEFT, padx=10)
         ttk.Button(top_frame, text="添加新车站",
                    command=lambda: self.add_station(manage_window)).pack(side=tk.RIGHT, padx=5)
 
-        # 车站列表
-        columns = ("name", "x_coord", "z_coord", "actions")
+        # 车站列表：操作拆成「编辑」「删除」两列，单元格显示图标
+        columns = ("name", "x_coord", "z_coord", "edit", "delete")
         tree = ttk.Treeview(manage_window, columns=columns, show="headings", height=20)
 
         tree.heading("name", text="车站名称")
         tree.heading("x_coord", text="X坐标")
         tree.heading("z_coord", text="Z坐标")
-        tree.heading("actions", text="操作（编辑 | 删除）")
+        tree.heading("edit", text="编辑")
+        tree.heading("delete", text="删除")
 
         tree.column("name", width=200)
-        tree.column("x_coord", width=90)
-        tree.column("z_coord", width=90)
-        tree.column("actions", width=170, anchor=tk.CENTER)
+        tree.column("x_coord", width=85)
+        tree.column("z_coord", width=85)
+        tree.column("edit", width=80, anchor=tk.CENTER)
+        tree.column("delete", width=80, anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(manage_window, orient="vertical", command=tree.yview)
         tree.configure(yscroll=scrollbar.set)
@@ -240,37 +259,35 @@ class RailwayApp:
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
 
-        # 刷新列表（仅填充数据，按钮改为点击单元格触发，绝不依赖 bbox/place）
+        # 刷新列表（仅填充数据；操作通过点击图标列触发，绝不依赖 bbox/place）
         def refresh_list():
             for item in tree.get_children():
                 tree.delete(item)
             search_text = search_var.get().strip().lower()
             for name, (x, z) in self.stations.items():
                 if search_text in name.lower():
-                    tree.insert("", tk.END, values=(name, f"{x:.1f}", f"{z:.1f}", "编辑 | 删除"))
+                    tree.insert("", tk.END,
+                                values=(name, f"{x:.1f}", f"{z:.1f}", "✏ 编辑", "✖ 删除"))
 
-        # 点击「操作」单元格：左半=编辑，右半=删除
+        # 点击「编辑」「删除」列：直接触发对应操作
         def on_tree_click(event):
             region = tree.identify_region(event.x, event.y)
             if region not in ("cell", "tree", "text"):
                 return
             row = tree.identify_row(event.y)
             col = tree.identify_column(event.x)
-            if not row or col != "#4":
+            if not row:
                 return
             values = tree.item(row, "values")
             if not values:
                 return
             name = values[0]
-            bbox = tree.bbox(row, "#4")
-            if not bbox:
-                return
-            # bbox 在“当前点击且可见”的行上一定有效，取单元格中点判断左右半
-            cx = bbox[0] + bbox[2] / 2.0
-            if event.x < cx:
+            if col == "#4":        # 编辑列
                 self.edit_station(name)
-            else:
+            elif col == "#5":      # 删除列
                 self.delete_station(name)
+            else:
+                return
             refresh_list()
 
         tree.bind("<Button-1>", on_tree_click)
@@ -1119,6 +1136,22 @@ class RailwayApp:
         high_speed_legend_added = False
         branch_legend_added = False
 
+        # 计算地图范围（与末尾 xlim/ylim 保持一致），供海陆底图使用
+        if self.stations:
+            _ax = [p[0] for p in self.stations.values()]
+            _az = [p[1] for p in self.stations.values()]
+            _pad = 50
+            _xmin, _xmax = min(_ax) - _pad, max(_ax) + _pad
+            _zmin, _zmax = min(_az) - _pad, max(_az) + _pad
+            _span = max(_xmax - _xmin, _zmax - _zmin)
+            _xc = (_xmin + _xmax) / 2
+            _zc = (_zmin + _zmax) / 2
+            _xmin, _xmax = _xc - _span / 2, _xc + _span / 2
+            _zmin, _zmax = _zc - _span / 2, _zc + _span / 2
+            self._map_bounds = (_xmin, _xmax, _zmin, _zmax)
+        else:
+            self._map_bounds = (-1000.0, 1000.0, -1000.0, 1000.0)
+
         # 分别收集三类铁路的线段，用于 LineCollection（比 ax.plot 更统一、更清爽）
         normal_segments = []
         high_speed_segments = []
@@ -1134,6 +1167,9 @@ class RailwayApp:
                 branch_segments.append(seg)
             else:
                 normal_segments.append(seg)
+
+        # 海陆底图（程序化近似，zorder=0，置于所有线路之下）
+        self._draw_terrain(self._map_bounds)
 
         # 普通铁路：深灰主线 + 白色枕木，形成经典轨道效果
         if normal_segments:
@@ -1224,30 +1260,21 @@ class RailwayApp:
             spine.set_color('#888888')
             spine.set_linewidth(1.0)
 
-        # 调整坐标范围 - 等比例显示，避免 X/Z 被不等拉伸导致地图失真
-        if self.stations:
-            all_x = [p[0] for p in self.stations.values()]
-            all_z = [p[1] for p in self.stations.values()]
-            pad = 50
-            x_min, x_max = min(all_x) - pad, max(all_x) + pad
-            z_min, z_max = min(all_z) - pad, max(all_z) + pad
-            max_span = max(x_max - x_min, z_max - z_min)
-            x_center = (x_min + x_max) / 2
-            z_center = (z_min + z_max) / 2
-            x_min, x_max = x_center - max_span / 2, x_center + max_span / 2
-            z_min, z_max = z_center - max_span / 2, z_center + max_span / 2
-            self.ax.set_xlim(x_min, x_max)
-            self.ax.set_ylim(z_max, z_min)  # 反转 z 轴，正方向向下
-            self.ax.set_aspect('equal', adjustable='datalim')
-        else:
-            self.ax.set_xlim(-1000, 1000)
-            self.ax.set_ylim(-1000, 1000)
-            self.ax.set_aspect('equal', adjustable='datalim')
+        # 调整坐标范围 - 等比例显示（使用与底图一致的边界，避免失真）
+        x_min, x_max, z_min, z_max = self._map_bounds
+        self.ax.set_xlim(x_min, x_max)
+        self.ax.set_ylim(z_max, z_min)  # 反转 z 轴，正方向向下
+        self.ax.set_aspect('equal', adjustable='datalim')
 
-        # 图例：小巧、白底、浅色边框
-        if normal_legend_added or high_speed_legend_added or branch_legend_added:
+        # 图例：小巧、白底、浅色边框（含海陆底图说明）
+        if normal_legend_added or high_speed_legend_added or branch_legend_added or self.show_terrain:
             handles, labels = self.ax.get_legend_handles_labels()
-            self.ax.legend(handles, labels, loc='upper right', fontsize=9,
+            if self.show_terrain:
+                handles = list(handles) + [
+                    Patch(facecolor='#BCDCF2', alpha=0.55, label='海洋（近似）'),
+                    Patch(facecolor='#F3EFE6', alpha=0.45, label='陆地（近似）'),
+                ]
+            self.ax.legend(handles, [h.get_label() for h in handles], loc='upper right', fontsize=9,
                            frameon=True, facecolor='white', edgecolor='#CCCCCC',
                            framealpha=0.95)
 
@@ -1260,6 +1287,106 @@ class RailwayApp:
             self._lod_connected = True
         self._update_ties()
         self._update_label_visibility()
+
+    def toggle_terrain(self):
+        """切换海陆底图显示，并重绘地图。"""
+        self.show_terrain = not self.show_terrain
+        self.terrain_toggle_btn.config(
+            text="海陆轮廓:开" if self.show_terrain else "海陆轮廓:关")
+        self.ax.clear()
+        self.draw_railway_map()
+        self.canvas.draw()
+
+    def _draw_terrain(self, bounds):
+        """基于世界种子绘制程序化近似海陆底图（非 Minecraft 真实地形）。
+
+        说明：Minecraft 基岩版地形生成管线为专有实现，Python 端无法精确复现。
+        此处用确定性 value-noise(fBm) 生成高度场，低于 SEA_LEVEL 填海洋蓝、
+        之上填陆地米色，颜色交界即海岸线，仅作地图视觉参考。
+
+        采用 imshow 绘制（纯 numpy + Agg，不依赖 contourpy），兼容性更好。
+        """
+        if not self.show_terrain:
+            self.terrain_artists = []
+            return
+        x_min, x_max, z_min, z_max = bounds
+        step = TERRAIN_STEP
+        nx = max(16, int((x_max - x_min) / step) + 1)
+        nz = max(16, int((z_max - z_min) / step) + 1)
+        xs = np.linspace(x_min, x_max, nx)
+        zs = np.linspace(z_min, z_max, nz)
+        X, Z = np.meshgrid(xs, zs)
+
+        # 复用缓存（范围不变时避免重复计算）
+        key = (nx, nz, round(x_min, 2), round(x_max, 2),
+               round(z_min, 2), round(z_max, 2))
+        cache = getattr(self, '_terrain_cache', None)
+        if cache is None or cache[0] != key:
+            H = self._terrain_height(X, Z)
+            self._terrain_cache = (key, H)
+        else:
+            H = cache[1]
+
+        sea = SEA_LEVEL
+        # 构建 RGBA 图像：海洋蓝 / 陆地米色，半透明，颜色交界即海岸线
+        ocean_rgb = np.array([0xBC / 255.0, 0xDC / 255.0, 0xF2 / 255.0])
+        land_rgb = np.array([0xF3 / 255.0, 0xEF / 255.0, 0xE6 / 255.0])
+        rgba = np.zeros((nz, nx, 4), dtype=float)
+        mask_ocean = H < sea
+        rgba[..., :3] = np.where(mask_ocean[..., np.newaxis], ocean_rgb, land_rgb)
+        rgba[..., 3] = 0.55
+
+        img = self.ax.imshow(
+            rgba, extent=[x_min, x_max, z_min, z_max],
+            origin='lower', zorder=0, interpolation='bilinear')
+        self.terrain_artists = [img]
+
+    def _terrain_height(self, X, Z):
+        """确定性 fBm 高度场（由 WORLD_SEED 驱动），归一化到 [0,1)。"""
+        span = max(float(X.max() - X.min()), float(Z.max() - Z.min()))
+        base_freq = 1.0 / (span / 3.0)  # 大陆尺度约为地图 1/3
+        H = np.zeros_like(X, dtype=float)
+        amp = 1.0
+        freq = base_freq
+        # 把 63 位世界种子拆成两段 31 位，逐倍频参与哈希，确保种子真正决定地貌
+        seed_lo = np.int64(WORLD_SEED & 0x7FFFFFFF)
+        seed_hi = np.int64((WORLD_SEED >> 31) & 0x7FFFFFFF)
+        for o in range(5):
+            salt = np.int64((seed_lo + (o + 1) * 1013904223) & 0x7FFFFFFF) ^ seed_hi
+            H += amp * self._value_noise(X, Z, freq, salt)
+            amp *= 0.5
+            freq *= 2.07  # 非整数倍，避免网格对齐伪影
+        H -= H.min()
+        H /= (H.max() + 1e-9)
+        return H
+
+    def _value_noise(self, X, Z, freq, salt):
+        """值噪声（平滑插值），返回 [0,1) 的二维数组。"""
+        fx = X * freq
+        fz = Z * freq
+        x0 = np.floor(fx).astype(np.int64)
+        z0 = np.floor(fz).astype(np.int64)
+        tx = fx - x0
+        tz = fz - z0
+        ux = tx * tx * (3.0 - 2.0 * tx)
+        uz = tz * tz * (3.0 - 2.0 * tz)
+        v00 = self._rand2(x0, z0, salt)
+        v10 = self._rand2(x0 + 1, z0, salt)
+        v01 = self._rand2(x0, z0 + 1, salt)
+        v11 = self._rand2(x0 + 1, z0 + 1, salt)
+        top = v00 * (1.0 - ux) + v10 * ux
+        bot = v01 * (1.0 - ux) + v11 * ux
+        return top * (1.0 - uz) + bot * uz
+
+    def _rand2(self, i, j, salt):
+        """整数坐标 -> [0,1) 的确定性伪随机（向量化整数哈希，种子驱动）。"""
+        i64 = i.astype(np.int64)
+        j64 = j.astype(np.int64)
+        n = np.bitwise_xor(np.left_shift(i64, 13), j64).astype(np.int64) + salt
+        n = np.bitwise_xor(n, np.right_shift(n, 17))
+        n = (n * 1274126177).astype(np.int64)
+        n = np.bitwise_and(n, np.int64(0x7FFFFFFF))
+        return n.astype(np.float64) / float(0x7FFFFFFF)
 
 if __name__ == "__main__":
     root = tk.Tk()
