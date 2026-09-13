@@ -1056,7 +1056,7 @@ class RailwayGUI:
             return
         
         # 保存路径
-        save_path = r"E:\我的世界railmap\列车数据.json"
+        save_path = r"E:\我的世界railmap\data\列车数据.json"
         
         try:
             # 创建目录（如果不存在）
@@ -1078,7 +1078,7 @@ class RailwayGUI:
     def load_data(self):
         """加载JSON文件数据"""
         # 加载路径
-        load_path = r"E:\我的世界railmap\列车数据.json"
+        load_path = r"E:\我的世界railmap\data\列车数据.json"
         
         if not os.path.exists(load_path):
             messagebox.showwarning("警告", f"文件不存在: {load_path}")
@@ -1253,7 +1253,7 @@ class RailwayGUI:
 
 def main():
     # 文件路径（请根据实际情况修改）
-    file_path = r"E:\我的世界railmap\线路和车站数据.json"
+    file_path = r"E:\我的世界railmap\data\线路和车站数据.json"
     
     try:
         # 初始化铁路系统

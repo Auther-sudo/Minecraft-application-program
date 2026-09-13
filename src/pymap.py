@@ -4,7 +4,7 @@ import tkinter as tk
 import json
 import os
 import heapq
-from tkinter import simpledialog, messagebox, filedialog, ttk
+from tkinter import simpledialog, messagebox, filedialog, ttk, scrolledtext
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from matplotlib.collections import LineCollection
@@ -191,101 +191,103 @@ class RailwayApp:
 
     # 管理车站相关方法
     def manage_stations(self):
-        """管理车站：添加、编辑、删除"""
-        # 创建管理窗口
+        """管理车站：搜索、添加、编辑、删除。
+
+        注意：旧实现用 tree.bbox() + frame.place() 把按钮嵌进表格行，
+        在列表需要滚动或首帧尚未布局时 bbox() 返回空，导致 refresh_list()
+        中途抛异常——列表只刷新出前几行、按钮也只生成在前几行，表现为
+        “车站/按钮显示不全”。现改为在「操作」列显示文本，点击单元格触发
+        编辑/删除，彻底规避 bbox 失效问题，所有车站与操作都能正常显示。
+        """
         manage_window = tk.Toplevel(self.root)
         manage_window.title("车站管理")
-        manage_window.geometry("600x500")
+        manage_window.geometry("640x520")
         manage_window.transient(self.root)
         manage_window.grab_set()
-        
-        # 顶部操作按钮
-        top_btn_frame = ttk.Frame(manage_window)
-        top_btn_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Button(top_btn_frame, text="添加新车站", command=lambda: self.add_station(manage_window)).pack(side=tk.RIGHT, padx=5)
-        
-        # 创建搜索框
-        search_frame = ttk.Frame(manage_window)
-        search_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Label(search_frame, text="搜索车站:").pack(side=tk.LEFT, padx=5)
+
+        # 顶部：搜索框 + 添加按钮
+        top_frame = ttk.Frame(manage_window)
+        top_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(top_frame, text="搜索车站:").pack(side=tk.LEFT, padx=(5, 2))
         search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=search_var, width=30)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        
-        # 创建车站列表
+        search_entry = ttk.Entry(top_frame, textvariable=search_var, width=26)
+        search_entry.pack(side=tk.LEFT, padx=2)
+        search_entry.focus_set()
+
+        ttk.Label(top_frame, text="提示：点击「编辑 | 删除」单元格操作",
+                  foreground="#666666").pack(side=tk.LEFT, padx=10)
+        ttk.Button(top_frame, text="添加新车站",
+                   command=lambda: self.add_station(manage_window)).pack(side=tk.RIGHT, padx=5)
+
+        # 车站列表
         columns = ("name", "x_coord", "z_coord", "actions")
-        tree = ttk.Treeview(manage_window, columns=columns, show="headings")
-        
-        # 定义列
+        tree = ttk.Treeview(manage_window, columns=columns, show="headings", height=20)
+
         tree.heading("name", text="车站名称")
         tree.heading("x_coord", text="X坐标")
         tree.heading("z_coord", text="Z坐标")
-        tree.heading("actions", text="操作")
-        
-        # 设置列宽
-        tree.column("name", width=150)
-        tree.column("x_coord", width=100)
-        tree.column("z_coord", width=100)
-        tree.column("actions", width=150)
-        
-        # 添加滚动条
+        tree.heading("actions", text="操作（编辑 | 删除）")
+
+        tree.column("name", width=200)
+        tree.column("x_coord", width=90)
+        tree.column("z_coord", width=90)
+        tree.column("actions", width=170, anchor=tk.CENTER)
+
         scrollbar = ttk.Scrollbar(manage_window, orient="vertical", command=tree.yview)
         tree.configure(yscroll=scrollbar.set)
-        
+
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
-        
-        # 刷新列表函数
+
+        # 刷新列表（仅填充数据，按钮改为点击单元格触发，绝不依赖 bbox/place）
         def refresh_list():
-            # 清空现有数据
             for item in tree.get_children():
                 tree.delete(item)
-            
-            # 添加数据
-            search_text = search_var.get().lower()
+            search_text = search_var.get().strip().lower()
             for name, (x, z) in self.stations.items():
                 if search_text in name.lower():
-                    item = tree.insert("", tk.END, values=(name, x, z, ""))
-                    
-                    # 创建操作按钮
-                    x_pos, y_pos, width, height = tree.bbox(item, "actions")
-                    frame = ttk.Frame(tree)
-                    
-                    # 编辑按钮
-                    edit_btn = ttk.Button(
-                        frame, 
-                        text="编辑", 
-                        width=6,
-                        command=lambda n=name: [self.edit_station(n), refresh_list()]
-                    )
-                    edit_btn.pack(side=tk.LEFT, padx=2)
-                    
-                    # 删除按钮
-                    delete_btn = ttk.Button(
-                        frame, 
-                        text="删除", 
-                        width=6,
-                        command=lambda n=name: [self.delete_station(n), refresh_list()]
-                    )
-                    delete_btn.pack(side=tk.LEFT, padx=2)
-                    
-                    frame.place(x=x_pos+5, y=y_pos+2, width=width-10, height=height-4)
-        
+                    tree.insert("", tk.END, values=(name, f"{x:.1f}", f"{z:.1f}", "编辑 | 删除"))
+
+        # 点击「操作」单元格：左半=编辑，右半=删除
+        def on_tree_click(event):
+            region = tree.identify_region(event.x, event.y)
+            if region not in ("cell", "tree", "text"):
+                return
+            row = tree.identify_row(event.y)
+            col = tree.identify_column(event.x)
+            if not row or col != "#4":
+                return
+            values = tree.item(row, "values")
+            if not values:
+                return
+            name = values[0]
+            bbox = tree.bbox(row, "#4")
+            if not bbox:
+                return
+            # bbox 在“当前点击且可见”的行上一定有效，取单元格中点判断左右半
+            cx = bbox[0] + bbox[2] / 2.0
+            if event.x < cx:
+                self.edit_station(name)
+            else:
+                self.delete_station(name)
+            refresh_list()
+
+        tree.bind("<Button-1>", on_tree_click)
+
         # 搜索框事件绑定
         search_var.trace_add("write", lambda *args: refresh_list())
-        
+
         # 初始刷新
         refresh_list()
-        
+
         # 窗口关闭时刷新地图
         def on_close():
             self.ax.clear()
             self.draw_railway_map()
             self.canvas.draw()
             manage_window.destroy()
-        
+
         manage_window.protocol("WM_DELETE_WINDOW", on_close)
 
     def add_station(self, parent_window):
@@ -764,72 +766,76 @@ class RailwayApp:
             else:
                 normal_distance += distance
         
-        # 查找最长运行时间
+        # 查找最长运行时间（单源 Dijkstra：每个起点只跑一次，替代 O(n^2) 全配对，
+        # 222 个车站也不会卡死界面；点击“统计信息”时也能很快出结果）
+        graph = self._build_railway_graph()
+        stations_list = list(self.stations.keys())
+
         max_time = 0.0
         max_path = []
         max_start = ""
         max_end = ""
-        
-        # 构建铁路网络图形表示
-        graph = self._build_railway_graph()
-        
-        # 获取所有车站列表
-        stations_list = list(self.stations.keys())
-        
-        # 检查所有可能的车站对
-        for i in range(len(stations_list)):
-            for j in range(i + 1, len(stations_list)):
-                start = stations_list[i]
-                end = stations_list[j]
-                
-                time, path = self._dijkstra_shortest_path(graph, start, end)
-                if time and time > max_time:
-                    max_time = time
+
+        for s in stations_list:
+            distances, previous = self._dijkstra_all_from(graph, s)
+            for t_node, t in distances.items():
+                if t != float('inf') and t > max_time:
+                    # 回溯路径 s -> t_node
+                    path = []
+                    cur = t_node
+                    while cur is not None:
+                        path.append(cur)
+                        cur = previous[cur]
+                    path.reverse()
+                    max_time = t
                     max_path = path
-                    max_start = start
-                    max_end = end
-        
-        # 创建统计信息窗口
+                    max_start = s
+                    max_end = t_node
+
+        # 创建统计信息窗口（可缩放 + 路线滚动，避免超长路线被截断“显示不全”）
         stats_window = tk.Toplevel(self.root)
         stats_window.title("铁路系统统计信息")
-        stats_window.geometry("500x400")
+        stats_window.geometry("560x480")
+        stats_window.resizable(True, True)
         stats_window.transient(self.root)
-        
-        # 显示里程统计
-        ttk.Label(stats_window, text="铁路里程统计", font=("SimHei", 12, "bold")).pack(anchor=tk.W, padx=20, pady=10)
-        
-        ttk.Label(stats_window, text=f"总里程: {total_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-        ttk.Label(stats_window, text=f"高速铁路里程: {high_speed_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-        ttk.Label(stats_window, text=f"普通铁路里程: {normal_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-        ttk.Label(stats_window, text=f"支线铁路里程: {branch_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-        
-        # 显示最长运行时间
-        ttk.Label(stats_window, text="\n最长运行时间", font=("SimHei", 12, "bold")).pack(anchor=tk.W, padx=20, pady=10)
-        
+
+        content = ttk.Frame(stats_window)
+        content.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+
+        ttk.Label(content, text="铁路里程统计", font=("SimHei", 12, "bold")).pack(anchor=tk.W, pady=(0, 6))
+        ttk.Label(content, text=f"总里程: {total_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+        ttk.Label(content, text=f"高速铁路里程: {high_speed_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+        ttk.Label(content, text=f"普通铁路里程: {normal_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+        ttk.Label(content, text=f"支线铁路里程: {branch_distance:.2f} 米", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+
+        ttk.Label(content, text="最长运行时间", font=("SimHei", 12, "bold")).pack(anchor=tk.W, pady=(10, 6))
+
         if max_time > 0:
             # 格式化最长时间
             hours = int(max_time // 3600)
             minutes = int((max_time % 3600) // 60)
             seconds = int(max_time % 60)
-            
+
             time_str = ""
             if hours > 0:
                 time_str += f"{hours}小时"
             if minutes > 0:
                 time_str += f"{minutes}分钟"
             time_str += f"{seconds}秒"
-            
-            ttk.Label(stats_window, text=f"最长时间: {time_str}", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-            ttk.Label(stats_window, text=f"站点: {max_start} 到 {max_end}", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-            
-            ttk.Label(stats_window, text="路线:", font=("SimHei", 10, "bold")).pack(anchor=tk.W, padx=30, pady=5)
-            path_text = " → ".join(max_path)
-            path_label = ttk.Label(stats_window, text=path_text, wraplength=400, font=("SimHei", 10))
-            path_label.pack(anchor=tk.W, padx=30, pady=5)
+
+            ttk.Label(content, text=f"最长时间: {time_str}", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+            ttk.Label(content, text=f"站点: {max_start} 到 {max_end}（共 {len(max_path)} 站）", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+            ttk.Label(content, text="路线:", font=("SimHei", 10, "bold")).pack(anchor=tk.W, padx=10, pady=(6, 2))
+
+            route_text = " → ".join(max_path)
+            route_box = scrolledtext.ScrolledText(content, wrap=tk.WORD, height=8, font=("SimHei", 10))
+            route_box.insert(tk.END, route_text)
+            route_box.configure(state=tk.DISABLED)
+            route_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=2)
         else:
-            ttk.Label(stats_window, text="没有可用的运行时间数据", font=("SimHei", 10)).pack(anchor=tk.W, padx=30, pady=5)
-        
-        ttk.Button(stats_window, text="关闭", command=stats_window.destroy).pack(pady=20)
+            ttk.Label(content, text="没有可用的运行时间数据", font=("SimHei", 10)).pack(anchor=tk.W, padx=10, pady=2)
+
+        ttk.Button(stats_window, text="关闭", command=stats_window.destroy).pack(pady=10)
 
     def _build_railway_graph(self):
         """构建铁路网络的图形表示，用于路径查找"""
@@ -899,6 +905,31 @@ class RailwayApp:
         path.reverse()
         
         return distances[end], path
+
+    def _dijkstra_all_from(self, graph, start):
+        """单源 Dijkstra：返回 (distances, previous_nodes)。
+
+        distances 为 start 到各节点的最短时间；previous_nodes 用于回溯路径。
+        相比“统计信息”里对每对车站都跑一次 Dijkstra（O(n^2)），单源只需
+        对每个起点跑一次（O(n)），222 个车站也能瞬间完成。
+        """
+        distances = {node: float('inf') for node in graph}
+        distances[start] = 0
+        previous = {node: None for node in graph}
+
+        priority_queue = [(0, start)]
+        while priority_queue:
+            current_distance, current_node = heapq.heappop(priority_queue)
+            if current_distance > distances[current_node]:
+                continue
+            for neighbor, time, _distance, _conn_type in graph[current_node]:
+                new_distance = current_distance + time
+                if new_distance < distances[neighbor]:
+                    distances[neighbor] = new_distance
+                    previous[neighbor] = current_node
+                    heapq.heappush(priority_queue, (new_distance, neighbor))
+
+        return distances, previous
 
     # 鼠标事件处理
     def on_press(self, event):
